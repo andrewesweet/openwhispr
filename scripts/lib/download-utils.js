@@ -11,10 +11,12 @@ const MAX_REDIRECTS = 5;
 /**
  * Get the GitHub token from environment variables, if set.
  * Supports both GITHUB_TOKEN and GH_TOKEN (GitHub CLI convention).
- * @returns {string | undefined}
+ * @returns {{ token: string, envVar: string } | null}
  */
 function getGitHubToken() {
-  return process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (process.env.GITHUB_TOKEN) return { token: process.env.GITHUB_TOKEN, envVar: "GITHUB_TOKEN" };
+  if (process.env.GH_TOKEN) return { token: process.env.GH_TOKEN, envVar: "GH_TOKEN" };
+  return null;
 }
 
 /**
@@ -32,9 +34,9 @@ function getGitHubHeaders(url, accept) {
     headers.Accept = accept;
   }
 
-  const token = getGitHubToken();
-  if (token && url.includes("github.com")) {
-    headers.Authorization = `Bearer ${token}`;
+  const auth = getGitHubToken();
+  if (auth && url.includes("github.com")) {
+    headers.Authorization = `Bearer ${auth.token}`;
   }
 
   return headers;
@@ -347,9 +349,9 @@ function cleanupFiles(binDir, prefix, keepPrefix) {
  * Call this at the start of download scripts to give users visibility.
  */
 function logGitHubTokenStatus() {
-  if (getGitHubToken()) {
-    const envVar = process.env.GITHUB_TOKEN ? "GITHUB_TOKEN" : "GH_TOKEN";
-    console.log(`[auth] Using ${envVar} for authenticated GitHub requests`);
+  const auth = getGitHubToken();
+  if (auth) {
+    console.log(`[auth] Using ${auth.envVar} for authenticated GitHub requests`);
   }
 }
 
