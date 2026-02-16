@@ -11,12 +11,17 @@ const MAX_REDIRECTS = 5;
 /**
  * Get the GitHub token from environment variables, if set.
  * Supports both GITHUB_TOKEN and GH_TOKEN (GitHub CLI convention).
+ * Result is cached since env vars won't change during a build script run.
  * @returns {{ token: string, envVar: string } | null}
  */
+let _cachedGitHubToken;
 function getGitHubToken() {
-  if (process.env.GITHUB_TOKEN) return { token: process.env.GITHUB_TOKEN, envVar: "GITHUB_TOKEN" };
-  if (process.env.GH_TOKEN) return { token: process.env.GH_TOKEN, envVar: "GH_TOKEN" };
-  return null;
+  if (_cachedGitHubToken === undefined) {
+    if (process.env.GITHUB_TOKEN) _cachedGitHubToken = { token: process.env.GITHUB_TOKEN, envVar: "GITHUB_TOKEN" };
+    else if (process.env.GH_TOKEN) _cachedGitHubToken = { token: process.env.GH_TOKEN, envVar: "GH_TOKEN" };
+    else _cachedGitHubToken = null;
+  }
+  return _cachedGitHubToken;
 }
 
 /**
