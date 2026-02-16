@@ -5,6 +5,7 @@ const { execSync } = require("child_process");
 const {
   downloadFile,
   findBinaryInDir,
+  logGitHubTokenStatus,
   parseArgs,
   setExecutable,
   cleanupFiles,
@@ -176,6 +177,8 @@ async function downloadBinary(platformArch, config, isForce = false) {
 }
 
 async function main() {
+  logGitHubTokenStatus();
+
   console.log(`\nDownloading sherpa-onnx binaries (v${SHERPA_ONNX_VERSION})...\n`);
 
   fs.mkdirSync(BIN_DIR, { recursive: true });

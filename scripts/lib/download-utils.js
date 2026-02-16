@@ -133,6 +133,27 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Build request headers for a download URL.
+ * Adds GitHub token authorization for github.com URLs when available.
+ * @param {string} url - The URL being downloaded
+ * @returns {object} Headers object
+ */
+function getDownloadHeaders(url) {
+  const headers = {
+    "User-Agent": "OpenWhispr-Downloader",
+  };
+
+  // Add GitHub token for github.com and GitHub API URLs
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (token && (url.includes("github.com") || url.includes("api.github.com"))) {
+    headers.Authorization = `Bearer ${token}`;
+    headers.Accept = "application/octet-stream";
+  }
+
+  return headers;
+}
+
 function downloadFile(url, dest, retryCount = 0) {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(dest);
@@ -153,7 +174,12 @@ function downloadFile(url, dest, retryCount = 0) {
         return;
       }
 
-      activeRequest = https.get(currentUrl, (response) => {
+      const options = {
+        headers: getDownloadHeaders(currentUrl),
+        timeout: REQUEST_TIMEOUT,
+      };
+
+      activeRequest = https.get(currentUrl, options, (response) => {
         if (response.statusCode === 302 || response.statusCode === 301) {
           const redirectUrl = response.headers.location;
           if (!redirectUrl) {
@@ -316,12 +342,25 @@ function cleanupFiles(binDir, prefix, keepPrefix) {
   });
 }
 
+/**
+ * Log whether a GitHub token is configured.
+ * Call this at the start of download scripts to give users visibility.
+ */
+function logGitHubTokenStatus() {
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (token) {
+    const envVar = process.env.GITHUB_TOKEN ? "GITHUB_TOKEN" : "GH_TOKEN";
+    console.log(`[auth] Using ${envVar} for authenticated GitHub requests`);
+  }
+}
+
 module.exports = {
   downloadFile,
   extractArchive,
   extractZip,
   fetchLatestRelease,
   findBinaryInDir,
+  logGitHubTokenStatus,
   parseArgs,
   setExecutable,
   cleanupFiles,
