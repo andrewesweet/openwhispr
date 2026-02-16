@@ -26,6 +26,9 @@ function getGitHubToken() {
       console.log("[auth] Using GH_TOKEN for authenticated GitHub requests");
     } else {
       _cachedGitHubToken = null;
+      console.log(
+        "[auth] No GITHUB_TOKEN or GH_TOKEN found; GitHub requests will be unauthenticated"
+      );
     }
   }
   return _cachedGitHubToken;
