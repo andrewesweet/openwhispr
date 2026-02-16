@@ -9,6 +9,8 @@ const {
   parseArgs,
   setExecutable,
   cleanupFiles,
+  checkLocalCache,
+  printCacheHint,
 } = require("./lib/download-utils");
 
 const WHISPER_CPP_REPO = "OpenWhispr/whisper.cpp";
@@ -73,18 +75,32 @@ async function downloadBinary(platformArch, config, release, isForce = false) {
     return true;
   }
 
-  const url = getDownloadUrl(release, config.zipName);
-  if (!url) {
-    console.error(`  [server] ${platformArch}: Asset ${config.zipName} not found in release`);
-    return false;
-  }
-  console.log(`  [server] ${platformArch}: Downloading from ${url}`);
-
   const zipPath = path.join(BIN_DIR, config.zipName);
 
-  try {
-    await downloadFile(url, zipPath);
+  // Check local cache first, then fall back to network download
+  const cachedPath = checkLocalCache(config.zipName);
+  if (cachedPath) {
+    console.log(`  [server] ${platformArch}: Found in local cache: ${cachedPath}`);
+    fs.copyFileSync(cachedPath, zipPath);
+  } else {
+    const url = getDownloadUrl(release, config.zipName);
+    if (!url) {
+      console.error(`  [server] ${platformArch}: Asset ${config.zipName} not found in release`);
+      printCacheHint(config.zipName);
+      return false;
+    }
+    console.log(`  [server] ${platformArch}: Downloading from ${url}`);
+    try {
+      await downloadFile(url, zipPath);
+    } catch (error) {
+      console.error(`  [server] ${platformArch}: Download failed - ${error.message}`);
+      printCacheHint(config.zipName, url);
+      if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
+      return false;
+    }
+  }
 
+  try {
     const extractDir = path.join(BIN_DIR, `temp-whisper-${platformArch}`);
     fs.mkdirSync(extractDir, { recursive: true });
     await extractZip(zipPath, extractDir);
@@ -120,13 +136,10 @@ async function main() {
   const release = await getRelease();
 
   if (!release) {
-    console.error(`[whisper-server] Could not fetch release from ${WHISPER_CPP_REPO}`);
-    console.log(`\nMake sure release exists: https://github.com/${WHISPER_CPP_REPO}/releases`);
-    process.exitCode = 1;
-    return;
+    console.log(`[whisper-server] Could not fetch release from ${WHISPER_CPP_REPO}, will check local cache`);
+  } else {
+    console.log(`\nDownloading whisper-server binaries (${release.tag})...\n`);
   }
-
-  console.log(`\nDownloading whisper-server binaries (${release.tag})...\n`);
 
   fs.mkdirSync(BIN_DIR, { recursive: true });
 

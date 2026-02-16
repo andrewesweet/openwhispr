@@ -11,7 +11,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { downloadFile, extractZip } = require("./lib/download-utils");
+const { downloadFile, extractZip, checkLocalCache, printCacheHint } = require("./lib/download-utils");
 
 const NIRCMD_URL = "https://www.nirsoft.net/utils/nircmd-x64.zip";
 const BIN_DIR = path.join(__dirname, "..", "resources", "bin");
@@ -35,12 +35,27 @@ async function main() {
     return;
   }
 
-  const zipPath = path.join(BIN_DIR, "nircmd-x64.zip");
+  const zipName = "nircmd-x64.zip";
+  const zipPath = path.join(BIN_DIR, zipName);
+
+  // Check local cache first, then fall back to network download
+  const cachedPath = checkLocalCache(zipName);
+  if (cachedPath) {
+    console.log(`  Found in local cache: ${cachedPath}`);
+    fs.copyFileSync(cachedPath, zipPath);
+  } else {
+    try {
+      console.log(`  Downloading from ${NIRCMD_URL}`);
+      await downloadFile(NIRCMD_URL, zipPath);
+    } catch (error) {
+      console.error(`  ✗ Failed to download nircmd.exe: ${error.message}\n`);
+      printCacheHint(zipName, NIRCMD_URL);
+      if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
+      process.exit(1);
+    }
+  }
 
   try {
-    console.log(`  Downloading from ${NIRCMD_URL}`);
-    await downloadFile(NIRCMD_URL, zipPath);
-
     console.log("  Extracting...");
     const extractDir = path.join(BIN_DIR, "temp-nircmd");
     fs.mkdirSync(extractDir, { recursive: true });
@@ -61,7 +76,7 @@ async function main() {
     fs.rmSync(extractDir, { recursive: true, force: true });
     fs.unlinkSync(zipPath);
   } catch (error) {
-    console.error(`  ✗ Failed to download nircmd.exe: ${error.message}\n`);
+    console.error(`  ✗ Failed to extract nircmd.exe: ${error.message}\n`);
     if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
     process.exit(1);
   }

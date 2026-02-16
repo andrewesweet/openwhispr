@@ -1,6 +1,7 @@
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { execSync } = require("child_process");
 
 const REQUEST_TIMEOUT = 30000;
@@ -363,6 +364,64 @@ function cleanupFiles(binDir, prefix, keepPrefix) {
   });
 }
 
+/**
+ * Get the local artifact cache directory.
+ * Configurable via OPENWHISPR_DOWNLOAD_CACHE env var.
+ * Defaults to ~/.cache/openwhispr/downloads/
+ * @returns {string}
+ */
+function getCacheDir() {
+  if (process.env.OPENWHISPR_DOWNLOAD_CACHE) {
+    return process.env.OPENWHISPR_DOWNLOAD_CACHE;
+  }
+  return path.join(os.homedir(), ".cache", "openwhispr", "downloads");
+}
+
+/**
+ * Check if a file exists in the local cache directory.
+ * @param {string} filename - The filename to look for
+ * @returns {string|null} Full path if found, null otherwise
+ */
+function checkLocalCache(filename) {
+  const cacheDir = getCacheDir();
+  const cachedPath = path.join(cacheDir, filename);
+  if (fs.existsSync(cachedPath)) {
+    return cachedPath;
+  }
+  return null;
+}
+
+/**
+ * Check cache directory for files matching a regex pattern.
+ * @param {RegExp} pattern - Pattern to match filenames
+ * @returns {{name: string, path: string}|null} First match or null
+ */
+function checkLocalCacheByPattern(pattern) {
+  const cacheDir = getCacheDir();
+  if (!fs.existsSync(cacheDir)) return null;
+  try {
+    const files = fs.readdirSync(cacheDir);
+    const match = files.find((f) => pattern.test(f));
+    return match ? { name: match, path: path.join(cacheDir, match) } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Print a hint telling the user how to manually populate the cache.
+ * @param {string} artifactName - The filename (or glob pattern) to download
+ * @param {string} [url] - Optional direct download URL
+ */
+function printCacheHint(artifactName, url) {
+  const cacheDir = getCacheDir();
+  console.log(`\n  [cache] To resolve manually, download "${artifactName}"`);
+  if (url) {
+    console.log(`  [cache] from: ${url}`);
+  }
+  console.log(`  [cache] and place it in: ${cacheDir}`);
+}
+
 module.exports = {
   downloadFile,
   extractArchive,
@@ -372,4 +431,8 @@ module.exports = {
   parseArgs,
   setExecutable,
   cleanupFiles,
+  getCacheDir,
+  checkLocalCache,
+  checkLocalCacheByPattern,
+  printCacheHint,
 };
