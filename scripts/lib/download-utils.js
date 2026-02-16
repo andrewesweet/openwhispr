@@ -9,6 +9,38 @@ const RETRY_DELAY = 2000;
 const MAX_REDIRECTS = 5;
 
 /**
+ * Get the GitHub token from environment variables, if set.
+ * Supports both GITHUB_TOKEN and GH_TOKEN (GitHub CLI convention).
+ * @returns {string | undefined}
+ */
+function getGitHubToken() {
+  return process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+}
+
+/**
+ * Build request headers for a GitHub URL.
+ * Always includes User-Agent; adds Authorization when a token is available
+ * and the URL points to github.com.
+ * @param {string} url - The target URL
+ * @param {string} [accept] - Accept header value (e.g. "application/vnd.github+json")
+ * @returns {object} Headers object
+ */
+function getGitHubHeaders(url, accept) {
+  const headers = { "User-Agent": "OpenWhispr-Downloader" };
+
+  if (accept) {
+    headers.Accept = accept;
+  }
+
+  const token = getGitHubToken();
+  if (token && url.includes("github.com")) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return headers;
+}
+
+/**
  * Fetch JSON from a URL with proper error handling.
  * @param {string} url - URL to fetch
  * @param {number} [redirectCount=0] - Current redirect count (internal use)
@@ -21,19 +53,8 @@ function fetchJson(url, redirectCount = 0) {
       return;
     }
 
-    const headers = {
-      "User-Agent": "OpenWhispr-Downloader",
-      Accept: "application/vnd.github+json",
-    };
-
-    // Use GitHub token if available (increases rate limit from 60 to 5000/hour)
-    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
     const options = {
-      headers,
+      headers: getGitHubHeaders(url, "application/vnd.github+json"),
       timeout: REQUEST_TIMEOUT,
     };
 
@@ -133,27 +154,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Build request headers for a download URL.
- * Adds GitHub token authorization for github.com URLs when available.
- * @param {string} url - The URL being downloaded
- * @returns {object} Headers object
- */
-function getDownloadHeaders(url) {
-  const headers = {
-    "User-Agent": "OpenWhispr-Downloader",
-  };
-
-  // Add GitHub token for github.com and GitHub API URLs
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  if (token && (url.includes("github.com") || url.includes("api.github.com"))) {
-    headers.Authorization = `Bearer ${token}`;
-    headers.Accept = "application/octet-stream";
-  }
-
-  return headers;
-}
-
 function downloadFile(url, dest, retryCount = 0) {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(dest);
@@ -175,7 +175,7 @@ function downloadFile(url, dest, retryCount = 0) {
       }
 
       const options = {
-        headers: getDownloadHeaders(currentUrl),
+        headers: getGitHubHeaders(currentUrl, "application/octet-stream"),
         timeout: REQUEST_TIMEOUT,
       };
 
@@ -347,8 +347,7 @@ function cleanupFiles(binDir, prefix, keepPrefix) {
  * Call this at the start of download scripts to give users visibility.
  */
 function logGitHubTokenStatus() {
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  if (token) {
+  if (getGitHubToken()) {
     const envVar = process.env.GITHUB_TOKEN ? "GITHUB_TOKEN" : "GH_TOKEN";
     console.log(`[auth] Using ${envVar} for authenticated GitHub requests`);
   }
