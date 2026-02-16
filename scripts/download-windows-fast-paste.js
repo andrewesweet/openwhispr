@@ -12,7 +12,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { downloadFile, extractZip, fetchLatestRelease, logGitHubTokenStatus, setExecutable } = require("./lib/download-utils");
+const { downloadFile, extractZip, fetchLatestRelease, setExecutable } = require("./lib/download-utils");
 
 const REPO = "OpenWhispr/openwhispr";
 const TAG_PREFIX = "windows-fast-paste-v";
@@ -37,8 +37,6 @@ async function main() {
     console.log(`  ${outputPath}`);
     return;
   }
-
-  logGitHubTokenStatus();
 
   if (VERSION_OVERRIDE) {
     console.log(`\n[windows-fast-paste] Using pinned version: ${VERSION_OVERRIDE}`);

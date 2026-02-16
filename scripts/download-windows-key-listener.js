@@ -12,7 +12,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { downloadFile, extractZip, fetchLatestRelease, logGitHubTokenStatus, setExecutable } = require("./lib/download-utils");
+const { downloadFile, extractZip, fetchLatestRelease, setExecutable } = require("./lib/download-utils");
 
 const REPO = "OpenWhispr/openwhispr";
 const TAG_PREFIX = "windows-key-listener-v";
@@ -40,8 +40,6 @@ async function main() {
     console.log(`  ${outputPath}`);
     return;
   }
-
-  logGitHubTokenStatus();
 
   // Fetch release (pinned version or latest)
   if (VERSION_OVERRIDE) {

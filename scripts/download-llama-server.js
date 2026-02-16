@@ -6,7 +6,6 @@ const {
   extractArchive,
   fetchLatestRelease,
   findBinaryInDir,
-  logGitHubTokenStatus,
   parseArgs,
   setExecutable,
   cleanupFiles,
@@ -169,8 +168,6 @@ async function downloadBinary(platformArch, config, release, isForce = false) {
 }
 
 async function main() {
-  logGitHubTokenStatus();
-
   if (VERSION_OVERRIDE) {
     console.log(`\n[llama-server] Using pinned version: ${VERSION_OVERRIDE}`);
   } else {

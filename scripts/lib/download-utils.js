@@ -11,15 +11,22 @@ const MAX_REDIRECTS = 5;
 /**
  * Get the GitHub token from environment variables, if set.
  * Supports both GITHUB_TOKEN and GH_TOKEN (GitHub CLI convention).
- * Result is cached since env vars won't change during a build script run.
- * @returns {{ token: string, envVar: string } | null}
+ * Result is cached and logged on first access since env vars won't change
+ * during a build script run.
+ * @returns {string | null}
  */
 let _cachedGitHubToken;
 function getGitHubToken() {
   if (_cachedGitHubToken === undefined) {
-    if (process.env.GITHUB_TOKEN) _cachedGitHubToken = { token: process.env.GITHUB_TOKEN, envVar: "GITHUB_TOKEN" };
-    else if (process.env.GH_TOKEN) _cachedGitHubToken = { token: process.env.GH_TOKEN, envVar: "GH_TOKEN" };
-    else _cachedGitHubToken = null;
+    if (process.env.GITHUB_TOKEN) {
+      _cachedGitHubToken = process.env.GITHUB_TOKEN;
+      console.log("[auth] Using GITHUB_TOKEN for authenticated GitHub requests");
+    } else if (process.env.GH_TOKEN) {
+      _cachedGitHubToken = process.env.GH_TOKEN;
+      console.log("[auth] Using GH_TOKEN for authenticated GitHub requests");
+    } else {
+      _cachedGitHubToken = null;
+    }
   }
   return _cachedGitHubToken;
 }
@@ -39,9 +46,9 @@ function getGitHubHeaders(url, accept) {
     headers.Accept = accept;
   }
 
-  const auth = getGitHubToken();
-  if (auth && url.includes("github.com")) {
-    headers.Authorization = `Bearer ${auth.token}`;
+  const token = getGitHubToken();
+  if (token && url.includes("github.com")) {
+    headers.Authorization = `Bearer ${token}`;
   }
 
   return headers;
@@ -349,24 +356,12 @@ function cleanupFiles(binDir, prefix, keepPrefix) {
   });
 }
 
-/**
- * Log whether a GitHub token is configured.
- * Call this at the start of download scripts to give users visibility.
- */
-function logGitHubTokenStatus() {
-  const auth = getGitHubToken();
-  if (auth) {
-    console.log(`[auth] Using ${auth.envVar} for authenticated GitHub requests`);
-  }
-}
-
 module.exports = {
   downloadFile,
   extractArchive,
   extractZip,
   fetchLatestRelease,
   findBinaryInDir,
-  logGitHubTokenStatus,
   parseArgs,
   setExecutable,
   cleanupFiles,
