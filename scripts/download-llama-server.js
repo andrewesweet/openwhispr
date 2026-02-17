@@ -2,15 +2,14 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  downloadFile,
+  downloadWithCacheFallback,
   extractArchive,
   fetchLatestRelease,
   findBinaryInDir,
   parseArgs,
+  regexToHint,
   setExecutable,
   cleanupFiles,
-  checkLocalCacheByPattern,
-  printCacheHint,
 } = require("./lib/download-utils");
 
 const LLAMA_CPP_REPO = "ggerganov/llama.cpp";
@@ -22,28 +21,24 @@ const VERSION_OVERRIDE = process.env.LLAMA_CPP_VERSION || null;
 const BINARIES = {
   "darwin-arm64": {
     assetPattern: /^llama-.*-bin-macos-arm64\.tar\.gz$/,
-    hintName: "llama-*-bin-macos-arm64.tar.gz",
     binaryPath: "build/bin/llama-server",
     outputName: "llama-server-darwin-arm64",
     libPattern: "*.dylib",
   },
   "darwin-x64": {
     assetPattern: /^llama-.*-bin-macos-x64\.tar\.gz$/,
-    hintName: "llama-*-bin-macos-x64.tar.gz",
     binaryPath: "build/bin/llama-server",
     outputName: "llama-server-darwin-x64",
     libPattern: "*.dylib",
   },
   "win32-x64": {
     assetPattern: /^llama-.*-bin-win-cpu-x64\.zip$/,
-    hintName: "llama-*-bin-win-cpu-x64.zip",
     binaryPath: "build/bin/llama-server.exe",
     outputName: "llama-server-win32-x64.exe",
     libPattern: "*.dll",
   },
   "linux-x64": {
     assetPattern: /^llama-.*-bin-ubuntu-x64\.tar\.gz$/,
-    hintName: "llama-*-bin-ubuntu-x64.tar.gz",
     binaryPath: "build/bin/llama-server",
     outputName: "llama-server-linux-x64",
     libPattern: "*.so*",
@@ -115,32 +110,17 @@ async function downloadBinary(platformArch, config, release, isForce = false) {
     return true;
   }
 
-  let archivePath;
-
-  // Check local cache first, then fall back to network download
-  const cachedResult = checkLocalCacheByPattern(config.assetPattern);
-  if (cachedResult) {
-    console.log(`  ${platformArch}: Found in local cache: ${cachedResult.path}`);
-    archivePath = path.join(BIN_DIR, cachedResult.name);
-    fs.copyFileSync(cachedResult.path, archivePath);
-  } else {
-    const asset = findAsset(release, config.assetPattern);
-    if (!asset) {
-      console.error(`  ${platformArch}: No matching asset found for pattern ${config.assetPattern}`);
-      printCacheHint(config.hintName);
-      return false;
-    }
-    console.log(`  ${platformArch}: Downloading from ${asset.url}`);
-    archivePath = path.join(BIN_DIR, asset.name);
-    try {
-      await downloadFile(asset.url, archivePath);
-    } catch (error) {
-      console.error(`  ${platformArch}: Download failed - ${error.message}`);
-      printCacheHint(asset.name, asset.url);
-      if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
-      return false;
-    }
-  }
+  const asset = findAsset(release, config.assetPattern);
+  const result = await downloadWithCacheFallback({
+    name: asset?.name,
+    url: asset?.url,
+    destDir: BIN_DIR,
+    cachePattern: config.assetPattern,
+    hintName: regexToHint(config.assetPattern),
+    label: platformArch,
+  });
+  if (!result) return false;
+  const archivePath = result.path;
 
   try {
     const extractDir = path.join(BIN_DIR, `temp-llama-${platformArch}`);
@@ -197,7 +177,9 @@ async function main() {
   const release = await getRelease();
 
   if (!release) {
-    console.log(`[llama-server] Could not fetch release from ${LLAMA_CPP_REPO}, will check local cache`);
+    console.log(
+      `[llama-server] Could not fetch release from ${LLAMA_CPP_REPO}, will check local cache`
+    );
   } else {
     console.log(`\nDownloading llama-server binaries (${release.tag})...\n`);
   }

@@ -2,15 +2,13 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  downloadFile,
+  downloadWithCacheFallback,
   extractZip,
   fetchLatestRelease,
   findBinaryInDir,
   parseArgs,
   setExecutable,
   cleanupFiles,
-  checkLocalCache,
-  printCacheHint,
 } = require("./lib/download-utils");
 
 const WHISPER_CPP_REPO = "OpenWhispr/whisper.cpp";
@@ -75,30 +73,15 @@ async function downloadBinary(platformArch, config, release, isForce = false) {
     return true;
   }
 
-  const zipPath = path.join(BIN_DIR, config.zipName);
-
-  // Check local cache first, then fall back to network download
-  const cachedPath = checkLocalCache(config.zipName);
-  if (cachedPath) {
-    console.log(`  [server] ${platformArch}: Found in local cache: ${cachedPath}`);
-    fs.copyFileSync(cachedPath, zipPath);
-  } else {
-    const url = getDownloadUrl(release, config.zipName);
-    if (!url) {
-      console.error(`  [server] ${platformArch}: Asset ${config.zipName} not found in release`);
-      printCacheHint(config.zipName);
-      return false;
-    }
-    console.log(`  [server] ${platformArch}: Downloading from ${url}`);
-    try {
-      await downloadFile(url, zipPath);
-    } catch (error) {
-      console.error(`  [server] ${platformArch}: Download failed - ${error.message}`);
-      printCacheHint(config.zipName, url);
-      if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
-      return false;
-    }
-  }
+  const url = getDownloadUrl(release, config.zipName);
+  const result = await downloadWithCacheFallback({
+    name: config.zipName,
+    url,
+    destDir: BIN_DIR,
+    label: `[server] ${platformArch}`,
+  });
+  if (!result) return false;
+  const zipPath = result.path;
 
   try {
     const extractDir = path.join(BIN_DIR, `temp-whisper-${platformArch}`);
@@ -136,7 +119,9 @@ async function main() {
   const release = await getRelease();
 
   if (!release) {
-    console.log(`[whisper-server] Could not fetch release from ${WHISPER_CPP_REPO}, will check local cache`);
+    console.log(
+      `[whisper-server] Could not fetch release from ${WHISPER_CPP_REPO}, will check local cache`
+    );
   } else {
     console.log(`\nDownloading whisper-server binaries (${release.tag})...\n`);
   }

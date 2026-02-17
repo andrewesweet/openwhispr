@@ -3,13 +3,11 @@ const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
 const {
-  downloadFile,
+  downloadWithCacheFallback,
   findBinaryInDir,
   parseArgs,
   setExecutable,
   cleanupFiles,
-  checkLocalCache,
-  printCacheHint,
 } = require("./lib/download-utils");
 
 const SHERPA_ONNX_VERSION = "1.12.23";
@@ -103,28 +101,17 @@ async function downloadBinary(platformArch, config, isForce = false) {
     return true;
   }
 
-  const archivePath = path.join(BIN_DIR, config.archiveName);
-
-  // Check local cache first, then fall back to network download
-  const cachedPath = checkLocalCache(config.archiveName);
-  if (cachedPath) {
-    console.log(`  ${platformArch}: Found in local cache: ${cachedPath}`);
-    fs.copyFileSync(cachedPath, archivePath);
-  } else {
-    const url = getDownloadUrl(config.archiveName);
-    console.log(`  ${platformArch}: Downloading from ${url}`);
-    try {
-      await downloadFile(url, archivePath);
-    } catch (error) {
-      console.error(`  ${platformArch}: Download failed - ${error.message}`);
-      printCacheHint(config.archiveName, url);
-      if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
-      return false;
-    }
-  }
+  const url = getDownloadUrl(config.archiveName);
+  const result = await downloadWithCacheFallback({
+    name: config.archiveName,
+    url,
+    destDir: BIN_DIR,
+    label: platformArch,
+  });
+  if (!result) return false;
+  const archivePath = result.path;
 
   try {
-
     const extractDir = path.join(BIN_DIR, `temp-sherpa-${platformArch}`);
     fs.mkdirSync(extractDir, { recursive: true });
     extractTarBz2(archivePath, extractDir);

@@ -422,17 +422,93 @@ function printCacheHint(artifactName, url) {
   console.log(`  [cache] and place it in: ${cacheDir}`);
 }
 
+/**
+ * Convert a regex pattern to a human-readable glob-like hint string.
+ * e.g. /^llama-.*-bin-macos-arm64\.tar\.gz$/ → "llama-*-bin-macos-arm64.tar.gz"
+ * @param {RegExp} pattern
+ * @returns {string}
+ */
+function regexToHint(pattern) {
+  return pattern.source
+    .replace(/^\^/, "")
+    .replace(/\$$/, "")
+    .replace(/\.\*/g, "*")
+    .replace(/\.\+/g, "*")
+    .replace(/\\\./g, ".");
+}
+
+/**
+ * Try the local cache first, then fall back to downloading.
+ *
+ * Supports two cache lookup modes:
+ * - Exact name: pass `name` to look up by exact filename
+ * - Pattern: pass `cachePattern` (RegExp) to match by pattern
+ *
+ * @param {object} options
+ * @param {string} [options.name] - Exact filename for cache lookup and download dest
+ * @param {string|null} [options.url] - Download URL (null = network unavailable)
+ * @param {string} options.destDir - Directory to write the file into
+ * @param {RegExp} [options.cachePattern] - Regex for pattern-based cache lookup
+ * @param {string} [options.hintName] - Display name for cache hint (defaults to name)
+ * @param {string} [options.label] - Log prefix (e.g. "darwin-arm64")
+ * @returns {Promise<{path: string}|null>} Path to the acquired file, or null on failure
+ */
+async function downloadWithCacheFallback({ name, url, destDir, cachePattern, hintName, label }) {
+  const logPrefix = label ? `  ${label}: ` : "  ";
+
+  // 1. Check local cache
+  if (cachePattern) {
+    const cachedResult = checkLocalCacheByPattern(cachePattern);
+    if (cachedResult) {
+      const destPath = path.join(destDir, cachedResult.name);
+      console.log(`${logPrefix}Found in local cache: ${cachedResult.path}`);
+      fs.copyFileSync(cachedResult.path, destPath);
+      return { path: destPath };
+    }
+  } else if (name) {
+    const cachedPath = checkLocalCache(name);
+    if (cachedPath) {
+      const destPath = path.join(destDir, name);
+      console.log(`${logPrefix}Found in local cache: ${cachedPath}`);
+      fs.copyFileSync(cachedPath, destPath);
+      return { path: destPath };
+    }
+  }
+
+  // 2. No cache hit — try network download
+  const displayName = hintName || name || "artifact";
+
+  if (!url) {
+    console.error(`${logPrefix}No download URL available for ${displayName}`);
+    printCacheHint(displayName);
+    return null;
+  }
+
+  const destName = name || path.basename(url.split("?")[0]);
+  const destPath = path.join(destDir, destName);
+
+  console.log(`${logPrefix}Downloading from ${url}`);
+  try {
+    await downloadFile(url, destPath);
+    return { path: destPath };
+  } catch (error) {
+    console.error(`${logPrefix}Download failed - ${error.message}`);
+    printCacheHint(displayName, url);
+    if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+    return null;
+  }
+}
+
 module.exports = {
   downloadFile,
+  downloadWithCacheFallback,
   extractArchive,
   extractZip,
   fetchLatestRelease,
   findBinaryInDir,
   parseArgs,
+  regexToHint,
   setExecutable,
   cleanupFiles,
   getCacheDir,
-  checkLocalCache,
-  checkLocalCacheByPattern,
-  printCacheHint,
 };

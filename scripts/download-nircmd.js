@@ -11,7 +11,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { downloadFile, extractZip, checkLocalCache, printCacheHint } = require("./lib/download-utils");
+const { downloadWithCacheFallback, extractZip } = require("./lib/download-utils");
 
 const NIRCMD_URL = "https://www.nirsoft.net/utils/nircmd-x64.zip";
 const BIN_DIR = path.join(__dirname, "..", "resources", "bin");
@@ -36,24 +36,16 @@ async function main() {
   }
 
   const zipName = "nircmd-x64.zip";
-  const zipPath = path.join(BIN_DIR, zipName);
 
-  // Check local cache first, then fall back to network download
-  const cachedPath = checkLocalCache(zipName);
-  if (cachedPath) {
-    console.log(`  Found in local cache: ${cachedPath}`);
-    fs.copyFileSync(cachedPath, zipPath);
-  } else {
-    try {
-      console.log(`  Downloading from ${NIRCMD_URL}`);
-      await downloadFile(NIRCMD_URL, zipPath);
-    } catch (error) {
-      console.error(`  ✗ Failed to download nircmd.exe: ${error.message}\n`);
-      printCacheHint(zipName, NIRCMD_URL);
-      if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
-      process.exit(1);
-    }
+  const result = await downloadWithCacheFallback({
+    name: zipName,
+    url: NIRCMD_URL,
+    destDir: BIN_DIR,
+  });
+  if (!result) {
+    process.exit(1);
   }
+  const zipPath = result.path;
 
   try {
     console.log("  Extracting...");

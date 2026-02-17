@@ -13,12 +13,10 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  downloadFile,
+  downloadWithCacheFallback,
   extractZip,
   fetchLatestRelease,
   setExecutable,
-  checkLocalCache,
-  printCacheHint,
 } = require("./lib/download-utils");
 
 const REPO = "OpenWhispr/openwhispr";
@@ -51,55 +49,32 @@ async function main() {
   // Ensure bin directory exists
   fs.mkdirSync(BIN_DIR, { recursive: true });
 
-  const zipPath = path.join(BIN_DIR, ZIP_NAME);
-
-  // Check local cache first, then fall back to network download
-  const cachedPath = checkLocalCache(ZIP_NAME);
-  if (cachedPath) {
-    console.log(`[windows-key-listener] Found in local cache: ${cachedPath}`);
-    fs.copyFileSync(cachedPath, zipPath);
+  // Fetch release (pinned version or latest)
+  if (VERSION_OVERRIDE) {
+    console.log(`\n[windows-key-listener] Using pinned version: ${VERSION_OVERRIDE}`);
   } else {
-    // Fetch release (pinned version or latest)
-    if (VERSION_OVERRIDE) {
-      console.log(`\n[windows-key-listener] Using pinned version: ${VERSION_OVERRIDE}`);
-    } else {
-      console.log("\n[windows-key-listener] Fetching latest release...");
-    }
-    const tagToFind = VERSION_OVERRIDE || TAG_PREFIX;
-    const release = await fetchLatestRelease(REPO, { tagPrefix: tagToFind });
-
-    if (!release) {
-      console.error("[windows-key-listener] Could not find a release matching prefix:", TAG_PREFIX);
-      printCacheHint(ZIP_NAME);
-      console.log(
-        "[windows-key-listener] Push-to-Talk will use fallback mode (compile locally or tap mode)"
-      );
-      return;
-    }
-
-    // Find the zip asset
-    const zipAsset = release.assets.find((a) => a.name === ZIP_NAME);
-    if (!zipAsset) {
-      console.error(`[windows-key-listener] Release ${release.tag} does not contain ${ZIP_NAME}`);
-      printCacheHint(ZIP_NAME);
-      return;
-    }
-
-    console.log(`\nDownloading Windows key listener (${release.tag})...\n`);
-    console.log(`  Downloading from: ${zipAsset.url}`);
-
-    try {
-      await downloadFile(zipAsset.url, zipPath);
-    } catch (error) {
-      console.error(`\n[windows-key-listener] Download failed: ${error.message}`);
-      printCacheHint(ZIP_NAME, zipAsset.url);
-      if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
-      console.log(
-        "[windows-key-listener] Push-to-Talk will use fallback mode (compile locally or tap mode)"
-      );
-      return;
-    }
+    console.log("\n[windows-key-listener] Fetching latest release...");
   }
+  const tagToFind = VERSION_OVERRIDE || TAG_PREFIX;
+  const release = await fetchLatestRelease(REPO, { tagPrefix: tagToFind });
+  const zipAsset = release?.assets?.find((a) => a.name === ZIP_NAME);
+
+  if (release && zipAsset) {
+    console.log(`\nDownloading Windows key listener (${release.tag})...\n`);
+  }
+
+  const result = await downloadWithCacheFallback({
+    name: ZIP_NAME,
+    url: zipAsset?.url || null,
+    destDir: BIN_DIR,
+  });
+  if (!result) {
+    console.log(
+      "[windows-key-listener] Push-to-Talk will use fallback mode (compile locally or tap mode)"
+    );
+    return;
+  }
+  const zipPath = result.path;
 
   try {
     // Extract zip
