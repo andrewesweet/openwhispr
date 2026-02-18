@@ -579,11 +579,15 @@ The token is sent as a `Bearer` header only for `github.com` URLs; downloads fro
 
 ### Local Download Cache
 
-Before hitting the network, every download script checks a local cache directory for a pre-placed artifact. This lets you build fully offline or work around rate limits and transient network errors.
+Set the `OPENWHISPR_DOWNLOAD_CACHE` environment variable to enable a local artifact cache. When enabled, every download script checks the cache directory for a pre-placed file before hitting the network. This lets you build fully offline or work around rate limits and transient network errors.
 
-| Variable | Default |
-|---|---|
-| `OPENWHISPR_DOWNLOAD_CACHE` | `~/.cache/openwhispr/downloads/` |
+```bash
+# Use the default cache path (~/.cache/openwhispr/downloads/)
+export OPENWHISPR_DOWNLOAD_CACHE=1
+
+# Or specify a custom directory
+export OPENWHISPR_DOWNLOAD_CACHE=/path/to/my/cache
+```
 
 Place the required file in the cache directory and the script will copy it instead of downloading. If both the cache and the network fail, the script prints a hint showing the exact filename and URL:
 
@@ -595,7 +599,7 @@ Place the required file in the cache directory and the script will copy it inste
 
 #### Worked example — macOS Apple Silicon (darwin-arm64)
 
-To pre-populate the cache for a full offline build on macOS aarch64, download these files into `~/.cache/openwhispr/downloads/`:
+To pre-populate the cache for a full offline build on macOS aarch64, download these files into the cache directory:
 
 | Script | Filename to cache |
 |---|---|
@@ -606,6 +610,7 @@ To pre-populate the cache for a full offline build on macOS aarch64, download th
 The Windows-only scripts (`download-nircmd`, `download-windows-key-listener`, `download-windows-fast-paste`) are skipped automatically on non-Windows platforms.
 
 ```bash
+export OPENWHISPR_DOWNLOAD_CACHE=1
 mkdir -p ~/.cache/openwhispr/downloads
 
 # Example: copy artefacts you've already downloaded elsewhere

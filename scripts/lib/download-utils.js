@@ -366,15 +366,19 @@ function cleanupFiles(binDir, prefix, keepPrefix) {
 
 /**
  * Get the local artifact cache directory.
- * Configurable via OPENWHISPR_DOWNLOAD_CACHE env var.
- * Defaults to ~/.cache/openwhispr/downloads/
- * @returns {string}
+ * Enabled by setting OPENWHISPR_DOWNLOAD_CACHE:
+ *   - "1" or "true" → uses the default path ~/.cache/openwhispr/downloads/
+ *   - Any other value → treated as a directory path
+ *   - Unset → caching is disabled (returns null)
+ * @returns {string|null}
  */
 function getCacheDir() {
-  if (process.env.OPENWHISPR_DOWNLOAD_CACHE) {
-    return process.env.OPENWHISPR_DOWNLOAD_CACHE;
+  const envVal = process.env.OPENWHISPR_DOWNLOAD_CACHE;
+  if (!envVal) return null;
+  if (envVal === "1" || envVal === "true") {
+    return path.join(os.homedir(), ".cache", "openwhispr", "downloads");
   }
-  return path.join(os.homedir(), ".cache", "openwhispr", "downloads");
+  return envVal;
 }
 
 /**
@@ -384,6 +388,7 @@ function getCacheDir() {
  */
 function checkLocalCache(filename) {
   const cacheDir = getCacheDir();
+  if (!cacheDir) return null;
   const cachedPath = path.join(cacheDir, filename);
   if (fs.existsSync(cachedPath)) {
     return cachedPath;
@@ -398,7 +403,7 @@ function checkLocalCache(filename) {
  */
 function checkLocalCacheByPattern(pattern) {
   const cacheDir = getCacheDir();
-  if (!fs.existsSync(cacheDir)) return null;
+  if (!cacheDir || !fs.existsSync(cacheDir)) return null;
   try {
     const files = fs.readdirSync(cacheDir);
     const match = files.find((f) => pattern.test(f));
@@ -419,7 +424,11 @@ function printCacheHint(artifactName, url) {
   if (url) {
     console.log(`  [cache] from: ${url}`);
   }
-  console.log(`  [cache] and place it in: ${cacheDir}`);
+  if (cacheDir) {
+    console.log(`  [cache] and place it in: ${cacheDir}`);
+  } else {
+    console.log(`  [cache] then set OPENWHISPR_DOWNLOAD_CACHE=1 (or a custom path) and re-run`);
+  }
 }
 
 /**
