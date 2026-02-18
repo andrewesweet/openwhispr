@@ -558,6 +558,70 @@ npm run build:linux    # AppImage + DEB
 
 Note: build/pack/dist scripts automatically download whisper.cpp, llama-server, and sherpa-onnx for the current platform. For multi-platform packaging from one host, run the `:all` variants first (`npm run download:whisper-cpp:all`, `npm run download:llama-server:all`, `npm run download:sherpa-onnx:all`).
 
+### GitHub Token Authentication
+
+The download scripts make requests to the GitHub API, which limits unauthenticated clients to 60 requests per hour. Setting a GitHub token raises this to 5,000 requests per hour. This is useful in CI environments and when iterating on builds locally.
+
+```bash
+# Either variable name works (GH_TOKEN is the GitHub CLI convention)
+export GITHUB_TOKEN=ghp_...
+# or
+export GH_TOKEN=ghp_...
+```
+
+When a token is set the scripts log which variable was used on first access:
+
+```
+[auth] Using GITHUB_TOKEN for authenticated GitHub requests
+```
+
+The token is sent as a `Bearer` header only for `github.com` URLs; downloads from other hosts (e.g. nirsoft.net) are unaffected.
+
+### Local Download Cache
+
+Set the `OPENWHISPR_DOWNLOAD_CACHE` environment variable to enable a local artifact cache. When enabled, every download script checks the cache directory for a pre-placed file before hitting the network. This lets you build fully offline or work around rate limits and transient network errors.
+
+```bash
+# Use the default cache path (~/.cache/openwhispr/downloads/)
+export OPENWHISPR_DOWNLOAD_CACHE=1
+
+# Or specify a custom directory
+export OPENWHISPR_DOWNLOAD_CACHE=/path/to/my/cache
+```
+
+Place the required file in the cache directory and the script will copy it instead of downloading. If both the cache and the network fail, the script prints a hint showing the exact filename and URL:
+
+```
+[cache] To resolve manually, download "whisper-server-darwin-arm64.zip"
+[cache] from: https://github.com/OpenWhispr/whisper.cpp/releases/...
+[cache] and place it in: /home/you/.cache/openwhispr/downloads
+```
+
+#### Worked example — macOS Apple Silicon (darwin-arm64)
+
+To pre-populate the cache for a full offline build on macOS aarch64, download these files into the cache directory:
+
+| Script | Filename to cache |
+|---|---|
+| `download-whisper-cpp` | `whisper-server-darwin-arm64.zip` |
+| `download-llama-server` | Any file matching `llama-*-bin-macos-arm64.tar.gz` (e.g. `llama-b5678-bin-macos-arm64.tar.gz`) |
+| `download-sherpa-onnx` | `sherpa-onnx-v1.12.23-osx-universal2-shared.tar.bz2` |
+
+The Windows-only scripts (`download-nircmd`, `download-windows-key-listener`, `download-windows-fast-paste`) are skipped automatically on non-Windows platforms.
+
+```bash
+export OPENWHISPR_DOWNLOAD_CACHE=1
+mkdir -p ~/.cache/openwhispr/downloads
+
+# Example: copy artefacts you've already downloaded elsewhere
+cp ~/Downloads/whisper-server-darwin-arm64.zip ~/.cache/openwhispr/downloads/
+cp ~/Downloads/llama-b5678-bin-macos-arm64.tar.gz ~/.cache/openwhispr/downloads/
+cp ~/Downloads/sherpa-onnx-v1.12.23-osx-universal2-shared.tar.bz2 ~/.cache/openwhispr/downloads/
+
+# Now build — no network requests needed for these binaries
+npm run pack
+```
+
 ## Configuration
 
 ### Environment Variables

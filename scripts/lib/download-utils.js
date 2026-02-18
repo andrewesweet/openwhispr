@@ -1,12 +1,62 @@
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { execSync } = require("child_process");
 
 const REQUEST_TIMEOUT = 30000;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 2000;
 const MAX_REDIRECTS = 5;
+
+/**
+ * Get the GitHub token from environment variables, if set.
+ * Supports both GITHUB_TOKEN and GH_TOKEN (GitHub CLI convention).
+ * Result is cached and logged on first access since env vars won't change
+ * during a build script run.
+ * @returns {string | null}
+ */
+let _cachedGitHubToken;
+function getGitHubToken() {
+  if (_cachedGitHubToken === undefined) {
+    if (process.env.GITHUB_TOKEN) {
+      _cachedGitHubToken = process.env.GITHUB_TOKEN;
+      console.log("[auth] Using GITHUB_TOKEN for authenticated GitHub requests");
+    } else if (process.env.GH_TOKEN) {
+      _cachedGitHubToken = process.env.GH_TOKEN;
+      console.log("[auth] Using GH_TOKEN for authenticated GitHub requests");
+    } else {
+      _cachedGitHubToken = null;
+      console.log(
+        "[auth] No GITHUB_TOKEN or GH_TOKEN found; GitHub requests will be unauthenticated"
+      );
+    }
+  }
+  return _cachedGitHubToken;
+}
+
+/**
+ * Build request headers for a GitHub URL.
+ * Always includes User-Agent; adds Authorization when a token is available
+ * and the URL points to github.com.
+ * @param {string} url - The target URL
+ * @param {string} [accept] - Accept header value (e.g. "application/vnd.github+json")
+ * @returns {object} Headers object
+ */
+function getGitHubHeaders(url, accept) {
+  const headers = { "User-Agent": "OpenWhispr-Downloader" };
+
+  if (accept) {
+    headers.Accept = accept;
+  }
+
+  const token = getGitHubToken();
+  if (token && url.includes("github.com")) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return headers;
+}
 
 /**
  * Fetch JSON from a URL with proper error handling.
@@ -21,19 +71,8 @@ function fetchJson(url, redirectCount = 0) {
       return;
     }
 
-    const headers = {
-      "User-Agent": "OpenWhispr-Downloader",
-      Accept: "application/vnd.github+json",
-    };
-
-    // Use GitHub token if available (increases rate limit from 60 to 5000/hour)
-    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
     const options = {
-      headers,
+      headers: getGitHubHeaders(url, "application/vnd.github+json"),
       timeout: REQUEST_TIMEOUT,
     };
 
@@ -45,7 +84,9 @@ function fetchJson(url, redirectCount = 0) {
             reject(new Error("Redirect without location header"));
             return;
           }
-          fetchJson(redirectUrl, redirectCount + 1).then(resolve).catch(reject);
+          fetchJson(redirectUrl, redirectCount + 1)
+            .then(resolve)
+            .catch(reject);
           return;
         }
 
@@ -153,7 +194,12 @@ function downloadFile(url, dest, retryCount = 0) {
         return;
       }
 
-      activeRequest = https.get(currentUrl, (response) => {
+      const options = {
+        headers: getGitHubHeaders(currentUrl, "application/octet-stream"),
+        timeout: REQUEST_TIMEOUT,
+      };
+
+      activeRequest = https.get(currentUrl, options, (response) => {
         if (response.statusCode === 302 || response.statusCode === 301) {
           const redirectUrl = response.headers.location;
           if (!redirectUrl) {
@@ -211,7 +257,8 @@ function downloadFile(url, dest, retryCount = 0) {
 
     request(url);
   }).catch(async (error) => {
-    const isTransient = error.message.includes("timed out") ||
+    const isTransient =
+      error.message.includes("timed out") ||
       error.code === "ECONNRESET" ||
       error.code === "ETIMEDOUT";
 
@@ -293,7 +340,8 @@ function parseArgs() {
     isCurrent: args.includes("--current"),
     isAll: args.includes("--all"),
     isForce: args.includes("--force"),
-    shouldCleanup: args.includes("--clean") ||
+    shouldCleanup:
+      args.includes("--clean") ||
       process.env.CI === "true" ||
       process.env.GITHUB_ACTIONS === "true",
   };
@@ -316,13 +364,159 @@ function cleanupFiles(binDir, prefix, keepPrefix) {
   });
 }
 
+/**
+ * Get the local artifact cache directory.
+ * Enabled by setting OPENWHISPR_DOWNLOAD_CACHE:
+ *   - "1" or "true" → uses the default path ~/.cache/openwhispr/downloads/
+ *   - Any other value → treated as a directory path
+ *   - Unset → caching is disabled (returns null)
+ * @returns {string|null}
+ */
+function getCacheDir() {
+  const envVal = process.env.OPENWHISPR_DOWNLOAD_CACHE;
+  if (!envVal) return null;
+  if (envVal === "1" || envVal === "true") {
+    return path.join(os.homedir(), ".cache", "openwhispr", "downloads");
+  }
+  return envVal;
+}
+
+/**
+ * Check if a file exists in the local cache directory.
+ * @param {string} filename - The filename to look for
+ * @returns {string|null} Full path if found, null otherwise
+ */
+function checkLocalCache(filename) {
+  const cacheDir = getCacheDir();
+  if (!cacheDir) return null;
+  const cachedPath = path.join(cacheDir, filename);
+  if (fs.existsSync(cachedPath)) {
+    return cachedPath;
+  }
+  return null;
+}
+
+/**
+ * Check cache directory for files matching a regex pattern.
+ * @param {RegExp} pattern - Pattern to match filenames
+ * @returns {{name: string, path: string}|null} First match or null
+ */
+function checkLocalCacheByPattern(pattern) {
+  const cacheDir = getCacheDir();
+  if (!cacheDir || !fs.existsSync(cacheDir)) return null;
+  try {
+    const files = fs.readdirSync(cacheDir);
+    const match = files.find((f) => pattern.test(f));
+    return match ? { name: match, path: path.join(cacheDir, match) } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Print a hint telling the user how to manually populate the cache.
+ * @param {string} artifactName - The filename (or glob pattern) to download
+ * @param {string} [url] - Optional direct download URL
+ */
+function printCacheHint(artifactName, url) {
+  const cacheDir = getCacheDir();
+  console.log(`\n  [cache] To resolve manually, download "${artifactName}"`);
+  if (url) {
+    console.log(`  [cache] from: ${url}`);
+  }
+  if (cacheDir) {
+    console.log(`  [cache] and place it in: ${cacheDir}`);
+  } else {
+    console.log(`  [cache] then set OPENWHISPR_DOWNLOAD_CACHE=1 (or a custom path) and re-run`);
+  }
+}
+
+/**
+ * Convert a regex pattern to a human-readable glob-like hint string.
+ * e.g. /^llama-.*-bin-macos-arm64\.tar\.gz$/ → "llama-*-bin-macos-arm64.tar.gz"
+ * @param {RegExp} pattern
+ * @returns {string}
+ */
+function regexToHint(pattern) {
+  return pattern.source
+    .replace(/^\^/, "")
+    .replace(/\$$/, "")
+    .replace(/\.\*/g, "*")
+    .replace(/\.\+/g, "*")
+    .replace(/\\\./g, ".");
+}
+
+/**
+ * Try the local cache first, then fall back to downloading.
+ *
+ * Supports two cache lookup modes:
+ * - Exact name: pass `name` to look up by exact filename
+ * - Pattern: pass `cachePattern` (RegExp) to match by pattern
+ *
+ * @param {object} options
+ * @param {string} [options.name] - Exact filename for cache lookup and download dest
+ * @param {string|null} [options.url] - Download URL (null = network unavailable)
+ * @param {string} options.destDir - Directory to write the file into
+ * @param {RegExp} [options.cachePattern] - Regex for pattern-based cache lookup
+ * @param {string} [options.hintName] - Display name for cache hint (defaults to name)
+ * @param {string} [options.label] - Log prefix (e.g. "darwin-arm64")
+ * @returns {Promise<{path: string}|null>} Path to the acquired file, or null on failure
+ */
+async function downloadWithCacheFallback({ name, url, destDir, cachePattern, hintName, label }) {
+  const logPrefix = label ? `  ${label}: ` : "  ";
+
+  // 1. Check local cache first (when enabled)
+  const cacheDir = getCacheDir();
+  if (cacheDir) {
+    const cached = cachePattern
+      ? checkLocalCacheByPattern(cachePattern)
+      : name
+        ? { name, path: checkLocalCache(name) }
+        : null;
+
+    if (cached?.path) {
+      const destPath = path.join(destDir, cached.name);
+      console.log(`${logPrefix}Found in local cache: ${cached.path}`);
+      fs.copyFileSync(cached.path, destPath);
+      return { path: destPath };
+    }
+    console.log(`${logPrefix}Not found in local cache (${cacheDir})`);
+  }
+
+  // 2. Cache miss or disabled — try network download
+  const displayName = hintName || name || "artifact";
+
+  if (!url) {
+    console.error(`${logPrefix}No download URL available for ${displayName}`);
+    printCacheHint(displayName);
+    return null;
+  }
+
+  const destName = name || path.basename(url.split("?")[0]);
+  const destPath = path.join(destDir, destName);
+
+  console.log(`${logPrefix}Downloading from ${url}`);
+  try {
+    await downloadFile(url, destPath);
+    return { path: destPath };
+  } catch (error) {
+    console.error(`${logPrefix}Download failed - ${error.message}`);
+    printCacheHint(displayName, url);
+    if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+    return null;
+  }
+}
+
 module.exports = {
   downloadFile,
+  downloadWithCacheFallback,
   extractArchive,
   extractZip,
   fetchLatestRelease,
   findBinaryInDir,
   parseArgs,
+  regexToHint,
   setExecutable,
   cleanupFiles,
+  getCacheDir,
 };

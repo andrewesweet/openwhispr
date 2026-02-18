@@ -12,7 +12,12 @@
 
 const fs = require("fs");
 const path = require("path");
-const { downloadFile, extractZip, fetchLatestRelease, setExecutable } = require("./lib/download-utils");
+const {
+  downloadWithCacheFallback,
+  extractZip,
+  fetchLatestRelease,
+  setExecutable,
+} = require("./lib/download-utils");
 
 const REPO = "OpenWhispr/openwhispr";
 const TAG_PREFIX = "windows-fast-paste-v";
@@ -38,6 +43,8 @@ async function main() {
     return;
   }
 
+  fs.mkdirSync(BIN_DIR, { recursive: true });
+
   if (VERSION_OVERRIDE) {
     console.log(`\n[windows-fast-paste] Using pinned version: ${VERSION_OVERRIDE}`);
   } else {
@@ -45,30 +52,24 @@ async function main() {
   }
   const tagToFind = VERSION_OVERRIDE || TAG_PREFIX;
   const release = await fetchLatestRelease(REPO, { tagPrefix: tagToFind });
+  const zipAsset = release?.assets?.find((a) => a.name === ZIP_NAME);
 
-  if (!release) {
-    console.error("[windows-fast-paste] Could not find a release matching prefix:", TAG_PREFIX);
+  if (release && zipAsset) {
+    console.log(`\nDownloading Windows fast-paste (${release.tag})...\n`);
+  }
+
+  const result = await downloadWithCacheFallback({
+    name: ZIP_NAME,
+    url: zipAsset?.url || null,
+    destDir: BIN_DIR,
+  });
+  if (!result) {
     console.log("[windows-fast-paste] Paste will use nircmd/PowerShell fallback");
     return;
   }
-
-  const zipAsset = release.assets.find((a) => a.name === ZIP_NAME);
-  if (!zipAsset) {
-    console.error(`[windows-fast-paste] Release ${release.tag} does not contain ${ZIP_NAME}`);
-    console.log("[windows-fast-paste] Available assets:", release.assets.map((a) => a.name).join(", "));
-    return;
-  }
-
-  console.log(`\nDownloading Windows fast-paste (${release.tag})...\n`);
-
-  fs.mkdirSync(BIN_DIR, { recursive: true });
-
-  const zipPath = path.join(BIN_DIR, ZIP_NAME);
-  console.log(`  Downloading from: ${zipAsset.url}`);
+  const zipPath = result.path;
 
   try {
-    await downloadFile(zipAsset.url, zipPath);
-
     const extractDir = path.join(BIN_DIR, "temp-windows-fast-paste");
     fs.mkdirSync(extractDir, { recursive: true });
 
@@ -90,9 +91,11 @@ async function main() {
     }
 
     const stats = fs.statSync(outputPath);
-    console.log(`\n[windows-fast-paste] Successfully downloaded ${release.tag} (${Math.round(stats.size / 1024)}KB)`);
+    console.log(
+      `\n[windows-fast-paste] Successfully installed (${Math.round(stats.size / 1024)}KB)`
+    );
   } catch (error) {
-    console.error(`\n[windows-fast-paste] Download failed: ${error.message}`);
+    console.error(`\n[windows-fast-paste] Extraction failed: ${error.message}`);
 
     if (fs.existsSync(zipPath)) {
       fs.unlinkSync(zipPath);

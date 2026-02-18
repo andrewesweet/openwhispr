@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
 const {
-  downloadFile,
+  downloadWithCacheFallback,
   findBinaryInDir,
   parseArgs,
   setExecutable,
@@ -102,13 +102,16 @@ async function downloadBinary(platformArch, config, isForce = false) {
   }
 
   const url = getDownloadUrl(config.archiveName);
-  console.log(`  ${platformArch}: Downloading from ${url}`);
-
-  const archivePath = path.join(BIN_DIR, config.archiveName);
+  const result = await downloadWithCacheFallback({
+    name: config.archiveName,
+    url,
+    destDir: BIN_DIR,
+    label: platformArch,
+  });
+  if (!result) return false;
+  const archivePath = result.path;
 
   try {
-    await downloadFile(url, archivePath);
-
     const extractDir = path.join(BIN_DIR, `temp-sherpa-${platformArch}`);
     fs.mkdirSync(extractDir, { recursive: true });
     extractTarBz2(archivePath, extractDir);
@@ -151,7 +154,11 @@ async function downloadBinary(platformArch, config, isForce = false) {
           for (const [baseName, versionedName] of versionedLibs) {
             const basePath = path.join(BIN_DIR, baseName);
             const versionedPath = path.join(BIN_DIR, versionedName);
-            if (fs.existsSync(basePath) && fs.existsSync(versionedPath) && !fs.lstatSync(basePath).isSymbolicLink()) {
+            if (
+              fs.existsSync(basePath) &&
+              fs.existsSync(versionedPath) &&
+              !fs.lstatSync(basePath).isSymbolicLink()
+            ) {
               fs.unlinkSync(basePath);
               fs.symlinkSync(versionedName, basePath);
               console.log(`  ${platformArch}: Symlinked ${baseName} -> ${versionedName}`);
@@ -198,10 +205,9 @@ async function main() {
     }
 
     // Remove old CLI-style binaries replaced by WS server binaries
-    const oldBinaryName =
-      args.platformArch.startsWith("win32")
-        ? `sherpa-onnx-${args.platformArch}.exe`
-        : `sherpa-onnx-${args.platformArch}`;
+    const oldBinaryName = args.platformArch.startsWith("win32")
+      ? `sherpa-onnx-${args.platformArch}.exe`
+      : `sherpa-onnx-${args.platformArch}`;
     const oldBinaryPath = path.join(BIN_DIR, oldBinaryName);
     if (fs.existsSync(oldBinaryPath)) {
       console.log(`  Removing old CLI binary: ${oldBinaryName}`);
@@ -229,7 +235,9 @@ async function main() {
     });
   } else {
     console.log("No binaries downloaded yet.");
-    console.log(`\nCheck: https://github.com/k2-fsa/sherpa-onnx/releases/tag/v${SHERPA_ONNX_VERSION}`);
+    console.log(
+      `\nCheck: https://github.com/k2-fsa/sherpa-onnx/releases/tag/v${SHERPA_ONNX_VERSION}`
+    );
   }
 }
 

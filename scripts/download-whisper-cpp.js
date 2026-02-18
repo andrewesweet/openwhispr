@@ -2,7 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  downloadFile,
+  downloadWithCacheFallback,
   extractZip,
   fetchLatestRelease,
   findBinaryInDir,
@@ -74,17 +74,16 @@ async function downloadBinary(platformArch, config, release, isForce = false) {
   }
 
   const url = getDownloadUrl(release, config.zipName);
-  if (!url) {
-    console.error(`  [server] ${platformArch}: Asset ${config.zipName} not found in release`);
-    return false;
-  }
-  console.log(`  [server] ${platformArch}: Downloading from ${url}`);
-
-  const zipPath = path.join(BIN_DIR, config.zipName);
+  const result = await downloadWithCacheFallback({
+    name: config.zipName,
+    url,
+    destDir: BIN_DIR,
+    label: `[server] ${platformArch}`,
+  });
+  if (!result) return false;
+  const zipPath = result.path;
 
   try {
-    await downloadFile(url, zipPath);
-
     const extractDir = path.join(BIN_DIR, `temp-whisper-${platformArch}`);
     fs.mkdirSync(extractDir, { recursive: true });
     await extractZip(zipPath, extractDir);
@@ -95,7 +94,9 @@ async function downloadBinary(platformArch, config, release, isForce = false) {
       setExecutable(outputPath);
       console.log(`  [server] ${platformArch}: Extracted to ${config.outputName}`);
     } else {
-      console.error(`  [server] ${platformArch}: Binary "${config.binaryName}" not found in archive`);
+      console.error(
+        `  [server] ${platformArch}: Binary "${config.binaryName}" not found in archive`
+      );
       return false;
     }
 
@@ -118,13 +119,12 @@ async function main() {
   const release = await getRelease();
 
   if (!release) {
-    console.error(`[whisper-server] Could not fetch release from ${WHISPER_CPP_REPO}`);
-    console.log(`\nMake sure release exists: https://github.com/${WHISPER_CPP_REPO}/releases`);
-    process.exitCode = 1;
-    return;
+    console.log(
+      `[whisper-server] Could not fetch release from ${WHISPER_CPP_REPO}, will check local cache`
+    );
+  } else {
+    console.log(`\nDownloading whisper-server binaries (${release.tag})...\n`);
   }
-
-  console.log(`\nDownloading whisper-server binaries (${release.tag})...\n`);
 
   fs.mkdirSync(BIN_DIR, { recursive: true });
 
@@ -138,7 +138,12 @@ async function main() {
     }
 
     console.log(`Downloading for target platform (${args.platformArch}):`);
-    const ok = await downloadBinary(args.platformArch, BINARIES[args.platformArch], release, args.isForce);
+    const ok = await downloadBinary(
+      args.platformArch,
+      BINARIES[args.platformArch],
+      release,
+      args.isForce
+    );
     if (!ok) {
       console.error(`Failed to download binaries for ${args.platformArch}`);
       process.exitCode = 1;

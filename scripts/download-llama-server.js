@@ -2,11 +2,12 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  downloadFile,
+  downloadWithCacheFallback,
   extractArchive,
   fetchLatestRelease,
   findBinaryInDir,
   parseArgs,
+  regexToHint,
   setExecutable,
   cleanupFiles,
 } = require("./lib/download-utils");
@@ -110,21 +111,21 @@ async function downloadBinary(platformArch, config, release, isForce = false) {
   }
 
   const asset = findAsset(release, config.assetPattern);
-  if (!asset) {
-    console.error(`  ${platformArch}: No matching asset found for pattern ${config.assetPattern}`);
-    return false;
-  }
-
-  console.log(`  ${platformArch}: Downloading from ${asset.url}`);
-
-  const zipPath = path.join(BIN_DIR, asset.name);
+  const result = await downloadWithCacheFallback({
+    name: asset?.name,
+    url: asset?.url,
+    destDir: BIN_DIR,
+    cachePattern: config.assetPattern,
+    hintName: regexToHint(config.assetPattern),
+    label: platformArch,
+  });
+  if (!result) return false;
+  const archivePath = result.path;
 
   try {
-    await downloadFile(asset.url, zipPath);
-
     const extractDir = path.join(BIN_DIR, `temp-llama-${platformArch}`);
     fs.mkdirSync(extractDir, { recursive: true });
-    await extractArchive(zipPath, extractDir);
+    await extractArchive(archivePath, extractDir);
 
     const binaryName = path.basename(config.binaryPath);
     let binaryPath = path.join(extractDir, config.binaryPath);
@@ -158,11 +159,11 @@ async function downloadBinary(platformArch, config, release, isForce = false) {
     }
 
     fs.rmSync(extractDir, { recursive: true, force: true });
-    if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
+    if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
     return true;
   } catch (error) {
     console.error(`  ${platformArch}: Failed - ${error.message}`);
-    if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
+    if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
     return false;
   }
 }
@@ -176,13 +177,12 @@ async function main() {
   const release = await getRelease();
 
   if (!release) {
-    console.error(`[llama-server] Could not fetch release from ${LLAMA_CPP_REPO}`);
-    console.log(`\nMake sure release exists: https://github.com/${LLAMA_CPP_REPO}/releases`);
-    process.exitCode = 1;
-    return;
+    console.log(
+      `[llama-server] Could not fetch release from ${LLAMA_CPP_REPO}, will check local cache`
+    );
+  } else {
+    console.log(`\nDownloading llama-server binaries (${release.tag})...\n`);
   }
-
-  console.log(`\nDownloading llama-server binaries (${release.tag})...\n`);
 
   fs.mkdirSync(BIN_DIR, { recursive: true });
 
@@ -196,7 +196,12 @@ async function main() {
     }
 
     console.log(`Downloading for target platform (${args.platformArch}):`);
-    const ok = await downloadBinary(args.platformArch, BINARIES[args.platformArch], release, args.isForce);
+    const ok = await downloadBinary(
+      args.platformArch,
+      BINARIES[args.platformArch],
+      release,
+      args.isForce
+    );
     if (!ok) {
       console.error(`Failed to download binaries for ${args.platformArch}`);
       process.exitCode = 1;
