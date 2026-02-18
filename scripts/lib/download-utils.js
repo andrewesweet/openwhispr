@@ -468,22 +468,17 @@ async function downloadWithCacheFallback({ name, url, destDir, cachePattern, hin
   // 1. Check local cache first (when enabled)
   const cacheDir = getCacheDir();
   if (cacheDir) {
-    if (cachePattern) {
-      const cachedResult = checkLocalCacheByPattern(cachePattern);
-      if (cachedResult) {
-        const destPath = path.join(destDir, cachedResult.name);
-        console.log(`${logPrefix}Found in local cache: ${cachedResult.path}`);
-        fs.copyFileSync(cachedResult.path, destPath);
-        return { path: destPath };
-      }
-    } else if (name) {
-      const cachedPath = checkLocalCache(name);
-      if (cachedPath) {
-        const destPath = path.join(destDir, name);
-        console.log(`${logPrefix}Found in local cache: ${cachedPath}`);
-        fs.copyFileSync(cachedPath, destPath);
-        return { path: destPath };
-      }
+    const cached = cachePattern
+      ? checkLocalCacheByPattern(cachePattern)
+      : name
+        ? { name, path: checkLocalCache(name) }
+        : null;
+
+    if (cached?.path) {
+      const destPath = path.join(destDir, cached.name);
+      console.log(`${logPrefix}Found in local cache: ${cached.path}`);
+      fs.copyFileSync(cached.path, destPath);
+      return { path: destPath };
     }
     console.log(`${logPrefix}Not found in local cache (${cacheDir})`);
   }
